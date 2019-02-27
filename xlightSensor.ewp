@@ -262,6 +262,7 @@
           <state>$PROJ_DIR$\Project\inc</state>
           <state>$PROJ_DIR$\..\xlightCommon\stm8l\STM8L15x_StdPeriph_Driver\inc</state>
           <state>$PROJ_DIR$\..\xlightCommon\stm8l\Xlight-stm8l</state>
+          <state>D:\dtit\program\XlightSensor\xlightCommon\stm8l\Xlight-stm8l\commonbusiness</state>
           <state>$PROJ_DIR$\..\xlightCommon\xlightdefine</state>
         </option>
         <option>
@@ -1622,6 +1623,12 @@
     </file>
     <file>
       <name>$PROJ_DIR$\..\xlightCommon\stm8l\Xlight-stm8l\UsartDev.h</name>
+    </file>
+    <file>
+      <name>$PROJ_DIR$\..\xlightCommon\stm8l\Xlight-stm8l\commonbusiness\XlightComBus.c</name>
+    </file>
+    <file>
+      <name>$PROJ_DIR$\..\xlightCommon\stm8l\Xlight-stm8l\commonbusiness\XlightComBus.h</name>
     </file>
   </group>
   <group>

@@ -15,7 +15,7 @@
 #define FULLPOWER        420
 #define LOWPOWER         368
 
-
+#define XLA_PRODUCT_NODEID        NODEID_MAX_SUPERSENSOR
 #define XLA_MIN_VER_REQUIREMENT   0x20
 typedef struct
 {
@@ -43,7 +43,7 @@ typedef struct
 } Config_t;
 
 extern Config_t gConfig;
-extern bool gIsChanged;
+extern bool gIsConfigChanged;
 extern bool gNeedSaveBackup;
 extern bool gIsStatusChanged;
 extern bool gResetRF;
@@ -62,6 +62,8 @@ void ToggleSDTM();
 void SetConfigMode(bool _sw, uint8_t _devIndex);
 bool SayHelloToDevice(bool infinate);
 void Button_Action();
+bool IsConfigInvalid();
+bool isNodeIdInvalid(uint8_t nodeid);
 
 //#define TEST
 #ifdef TEST

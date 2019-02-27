@@ -10,6 +10,7 @@
 #include "stm8l15x_rtc.h"
 #include "led.h"
 #include "UsartDev.h"
+#include "XlightComBus.h"
 
 /*
 Xlight Remoter Program
@@ -48,8 +49,6 @@ void ioinit()
 // Timeout
 #define RTE_TM_CONFIG_MODE              12000  // timeout in config mode, about 120s (12000 * 10ms)
 
-const UC RF24_BASE_RADIO_ID[ADDRESS_WIDTH] = {0x00,0x54,0x49,0x54,0x44};
-
 
 // Public variables
 Config_t gConfig;
@@ -60,7 +59,7 @@ uint8_t *psndMsg = (uint8_t *)&sndMsg;
 uint8_t *prcvMsg = (uint8_t *)&rcvMsg;
 bool gNeedSaveBackup = FALSE;
 bool gIsStatusChanged = FALSE;
-bool gIsChanged = FALSE;
+bool gIsConfigChanged = FALSE;
 bool gResetRF = FALSE;
 bool gResetNode = FALSE;
 
@@ -110,11 +109,6 @@ uint8_t mutex;
 uint16_t configMode_tick = 0;
 void tmrProcess();
 
-
-bool isNodeIdRequired()
-{
-
-}
 
 static void clock_init(void)
 {
@@ -263,6 +257,7 @@ void wakeup_config(void) {
   ADC_Config(); 
   RF24L01_init();
   NRF2401_EnableIRQ();
+  UpdateNodeAddress(NODEID_GATEWAY);
 #ifdef DEBUG_LOG
   usart_config(9600);
 #endif
@@ -273,9 +268,9 @@ void wakeup_config(void) {
 void SaveConfig()
 {
 #ifndef ENABLE_SDTM
-  if( gIsChanged ) {
+  if( gIsConfigChanged ) {
     Flash_WriteBuf(FLASH_DATA_EEPROM_START_PHYSICAL_ADDRESS, (uint8_t *)&gConfig, sizeof(gConfig));
-    gIsChanged = FALSE;
+    gIsConfigChanged = FALSE;
   }
 #endif  
 }*/
@@ -284,7 +279,7 @@ void SaveConfig()
 void SaveBackupConfig()
 {
   if( gNeedSaveBackup ) {
-    // Overwrite entire config FLASH
+    // Overwrite entire config bakup FLASH
     if(Flash_WriteDataBlock(BACKUP_CONFIG_BLOCK_NUM, (uint8_t *)&gConfig, sizeof(gConfig)))
     {
       gNeedSaveBackup = FALSE;
@@ -311,20 +306,19 @@ void SaveConfig()
   if( gIsStatusChanged ) {
     // Overwrite only Static & status parameters (the first part of config FLASH)
     SaveStatusData();
-    gIsChanged = TRUE;
+    gIsConfigChanged = TRUE;
   } 
-  if( gIsChanged ) {
+  if( gIsConfigChanged ) {
     // Overwrite entire config FLASH
     if(Flash_WriteDataBlock(0, (uint8_t *)&gConfig, sizeof(gConfig)))
     {
       gIsStatusChanged = FALSE;
-      gIsChanged = FALSE;
+      gIsConfigChanged = FALSE;
       gNeedSaveBackup = TRUE;
       return;
     }
   } 
 }
-
 
 bool IsConfigInvalid() {
   return( gConfig.version > XLA_VERSION || gConfig.version < XLA_MIN_VER_REQUIREMENT 
@@ -332,7 +326,12 @@ bool IsConfigInvalid() {
        || gConfig.rfPowerLevel > RF24_PA_MAX || gConfig.rfChannel > 127 || gConfig.rfDataRate > RF24_250KBPS );
 }
 
-// Load config from Flash
+bool isNodeIdInvalid(uint8_t nodeid)
+{
+  return( !IS_SENSOR_NODEID(nodeid)  );
+}
+
+/*// Load config from Flash
 void LoadConfig()
 {
     // Load the most recent settings from FLASH
@@ -353,7 +352,7 @@ void LoadConfig()
         gConfig.rfDataRate = RF24_250KBPS;      
         memcpy(gConfig.NetworkID, RF24_BASE_RADIO_ID, ADDRESS_WIDTH);
       }
-      gIsChanged = TRUE;
+      gIsConfigChanged = TRUE;
     }
     else {
       uint8_t bytVersion;
@@ -369,7 +368,7 @@ void LoadConfig()
       memcpy(&gConfig,pData,nLen);
     }
     gConfig.rfChannel = 87;
-}
+}*/
 
 void UpdateNodeAddress(uint8_t _tx) {
   memcpy(rx_addr, gConfig.NetworkID, ADDRESS_WIDTH);
@@ -556,28 +555,13 @@ int main( void ) {
   SendMyMessage();         // add 20uA,powerdown rf chip when rfdeinit,resolve
 
   printlog("start...");
-
+  gIsInConfig = 1;
   while (1) {
        
     // Feed the Watchdog
     feed_wwdg();
-    if(gIsInConfig)
-    { // 正在配置中
-      ////////////rfscanner process///////////////////////////////
-      ProcessOutputCfgMsg(); 
-      // reset rf
-      ResetRFModule();
-      if(gResetNode)
-      {
-        gResetNode = FALSE;
-      }
-      ////////////rfscanner process/////////////////////////////// 
-      // Save Config if Changed
-      SaveConfig(); 
-      // Save config into backup area
-      SaveBackupConfig(); 
-    }
     LedPortType led = LED_GREEN;
+    ///////////////ALS collect,and send////////////////////////
     if(gIsWakeup)
     { // rtc timer wakeup
       gIsWakeup = 0;
@@ -599,6 +583,29 @@ int main( void ) {
         Msg_SenALS(als_value);
         SendMyMessage();
       }
+    }
+    ///////////////ALS collect,and send////////////////////////
+    if(gIsInConfig)
+    { // 正在配置中
+      if(gKeyLowPowerLeft == 0)
+      {
+        gKeyLowPowerLeft = 600;
+        drv_led_on(LED_GREEN);
+      }
+
+      ////////////rfscanner process///////////////////////////////
+      ProcessOutputCfgMsg(); 
+      // reset rf
+      ResetRFModule();
+      if(gResetNode)
+      {
+        gResetNode = FALSE;
+      }
+      ////////////rfscanner process/////////////////////////////// 
+      // Save Config if Changed
+      SaveConfig(); 
+      // Save config into backup area
+      SaveBackupConfig(); 
     }
     if(gKeyLowPowerLeft>0)
     { // 按键唤醒
@@ -646,6 +653,7 @@ int main( void ) {
             drv_led_on(LED_RED);
           }
         }
+        gIsInConfig = 0;
         lowpower_config();
         halt();
         bPowerOn = FALSE;

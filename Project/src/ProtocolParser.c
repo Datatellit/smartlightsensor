@@ -3,6 +3,7 @@
 #include "MyMessage.h"
 #include "xliNodeConfig.h"
 #include "button.h"
+#include "rf24l01.h"
 
 uint8_t bMsgReady = 0;
 
@@ -107,10 +108,56 @@ uint8_t ParseProtocol(){
       case NCF_DEV_MAX_NMRT:
         gConfig.rptTimes = rcvMsg.payload.data[0];   
         break;
-      case NCF_DATA_FN_HUE:
+      case NCF_DEV_SET_RF:
+        if( _lenPayl >= 1)
+        {
+           // Node base rf info Config
+          uint8_t newNid = rcvMsg.payload.data[0];
+          if(newNid !=0 && !isNodeIdInvalid(newNid))
+          {
+            gConfig.nodeID = newNid;
+            gResetRF = TRUE;
+          }
+        }
+        if(_lenPayl >= 2) 
+        {
+          uint8_t rfchannel = rcvMsg.payload.data[1];
+          if(rfchannel != 0)
+          {
+            gConfig.rfChannel = rfchannel;
+            gResetRF = TRUE;
+          }
+        }
+        if(_lenPayl >= 3)
+        {
+          uint8_t subid = rcvMsg.payload.data[2];
+          gConfig.subID = subid;
+        }
+        if(_lenPayl >= 4)
+        {
+          uint8_t netlen = _lenPayl - 3;
+          uint8_t bnetvalid = 0;
+          for(uint8_t i = 0;i<netlen;i++)
+          {
+            if(rcvMsg.payload.data[3+i] != 0) 
+            {
+              bnetvalid = 1;
+              break;
+            }
+          }
+          if(bnetvalid)
+          {
+            memset(gConfig.NetworkID,0x00,sizeof(gConfig.NetworkID));
+            for(uint8_t j = 0;j<netlen;j++)
+            {
+              gConfig.NetworkID[4-j] = rcvMsg.payload.data[3+j];
+            }
+            gResetRF = TRUE;
+          }
+        }
         break;
       }
-      gIsChanged = TRUE;
+      gIsConfigChanged = TRUE;
       Msg_NodeConfigAck(_sender, _sensor);
       return 1;
     }else if( _type == I_GET_NONCE ) {
@@ -284,7 +331,7 @@ void MsgScanner_ConfigAck(uint8_t offset,uint8_t cfglen,bool _isByUniqueid) {
 void Process_SetConfig(u8 _len) {
   uint8_t offset = rcvMsg.payload.data[1];
   memcpy((void *)((uint16_t)(&gConfig) + offset),rcvMsg.payload.data+2,_len);
-  gIsChanged = TRUE;
+  gIsConfigChanged = TRUE;
 }
 //////set config by uniqueid data struct/////////////////////
 //typedef struct
@@ -299,7 +346,7 @@ void Process_SetConfig(u8 _len) {
 void Process_SetDevConfig(u8 _len) {
     uint8_t offset = rcvMsg.payload.data[1];
     memcpy((void *)((uint16_t)(&gConfig) + offset),rcvMsg.payload.data+2+UNIQUE_ID_LEN,_len);
-    gIsChanged = TRUE;
+    gIsConfigChanged = TRUE;
 }
 bool IsNodeidValid(uint8_t nodeid)
 {
@@ -405,7 +452,7 @@ void Process_SetupRF(const UC *rfData,uint8_t rflen)
     gResetNode = TRUE;
   if(gResetNode || gResetRF || bNeedChangeCfg)
   {
-    gIsChanged = TRUE;
+    gIsConfigChanged = TRUE;
   }
 }
 //----------------------------------------------
