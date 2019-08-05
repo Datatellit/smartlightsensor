@@ -602,27 +602,6 @@ int main( void ) {
       // Save config into backup area
       SaveBackupConfig(); 
     }
-    if(gKeyLowPowerLeft>0)
-    { // °´¼ü»½ÐÑ
-       if(!bPowerOn)
-      {
-        bPowerOn = TRUE;
-        wakeup_config();
-      } 
-    }
-    if(gKeyLastInterval >= 500)
-    { //°´¼ü³¬Ê±
-      gKeyLastInterval = 0;
-      gKeyLowPowerLeft = 0;
-      if(gWorkMode == POWERUP)
-      {
-        drv_led_off(LED_GREEN);
-      }
-      else
-      {
-        drv_led_off(LED_RED);
-      }
-    }
     if(gKeyLowPowerLeft == 0)
     {
         gKeyLastInterval = 0;
@@ -658,7 +637,7 @@ int main( void ) {
 
 void Button_Action()
 {
-  if(gKeyLastInterval >100 && gKeyLastInterval <=500)
+  /*if(gKeyLastInterval >100 && gKeyLastInterval <=500)
   { //switch status
     gKeyLastInterval = 0;
     if(gWorkMode == POWERUP)
@@ -683,7 +662,7 @@ void Button_Action()
   else
   {
     drv_led_on(LED_RED);
-  }
+  }*/
 }
 
 // Execute timer operations
