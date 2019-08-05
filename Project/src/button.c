@@ -240,7 +240,7 @@ void btn_double_long_hold_press(uint8_t _btn1, uint8_t _btn2)
 
 void app_button_event_handler(uint8_t _btn, button_event_t button_event)
 {
-  uint8_t sec_btn = BTN_NUM;
+  //uint8_t sec_btn = BTN_NUM;
   
   switch (button_event)
   {

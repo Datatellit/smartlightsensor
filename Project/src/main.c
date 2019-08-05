@@ -653,9 +653,9 @@ int main( void ) {
             drv_led_on(LED_RED);
           }
         }
-        gIsInConfig = 0;
         lowpower_config();
         halt();
+        gIsInConfig = 0;
         bPowerOn = FALSE;
     }
   }
