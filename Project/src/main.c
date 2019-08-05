@@ -73,6 +73,8 @@ bool bPowerOn = FALSE;
 uint16_t gRedLefttime = 0;
 uint16_t gGreenLefttime = 0;
 
+uint16_t als_tick = 0;
+
 
 /** 电池电量LEVEL */
 typedef enum EQLevel
@@ -408,11 +410,13 @@ bool WaitMutex(uint32_t _timeout) {
 // reset rf
 void ResetRFModule()
 {
+
   if(gResetRF)
   {
-    RF24L01_init();
+    WWDG->CR = 0x80;
+    /*RF24L01_init();
     NRF2401_EnableIRQ();
-    UpdateNodeAddress(NODEID_GATEWAY);
+    UpdateNodeAddress(NODEID_GATEWAY);*/
     gResetRF=FALSE;
   }
 }
@@ -590,8 +594,7 @@ int main( void ) {
 
       ////////////rfscanner process///////////////////////////////
       ProcessOutputCfgMsg(); 
-      // reset rf
-      ResetRFModule();
+
       if(gResetNode)
       {
         gResetNode = FALSE;
@@ -601,6 +604,8 @@ int main( void ) {
       SaveConfig(); 
       // Save config into backup area
       SaveBackupConfig(); 
+      // reset rf
+      ResetRFModule();
     }
     if(gKeyLowPowerLeft == 0)
     {
@@ -610,6 +615,10 @@ int main( void ) {
           printlog("enter low...");
           drv_led_off(LED_RED);
           drv_led_off(LED_GREEN);
+          gIsInConfig = 0;
+          lowpower_config();
+          halt();
+          bPowerOn = FALSE;
         }
         else
         { // 充电状态下，根据充电状态灯常亮
@@ -626,11 +635,19 @@ int main( void ) {
             drv_led_off(LED_GREEN);
             drv_led_on(LED_RED);
           }
+          
+          // 5s send interval
+          if(als_tick>= 500)
+          {
+            als_checkData();
+            Msg_SenALS(als_value);
+            SendMyMessage();
+            als_tick = 0;
+          }
+          Check_eq();
+
         }
-        gIsInConfig = 0;
-        lowpower_config();
-        halt();
-        bPowerOn = FALSE;
+
     }
   }
 }
@@ -674,6 +691,10 @@ void tmrProcess() {
   if(gKeyLastInterval>=0)
   {
     gKeyLastInterval++;
+  }
+  if(als_tick < 500)
+  {
+    als_tick++;
   }
 }
 
