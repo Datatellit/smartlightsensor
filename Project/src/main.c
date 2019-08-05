@@ -544,11 +544,6 @@ int main( void ) {
   ////////////////PB0 control pin test code///////////////////////////
   ioinit();
   GPIO_WriteBit(GPIOB,GPIO_Pin_0,SET);
-  /*while(1)
-  {
-      Check_eq();
-      delay_ms(1000);
-  }*/
   ////////////////PB0 control pin test code///////////////////////////
   // Send Presentation Message
   Msg_Presentation();
@@ -653,9 +648,9 @@ int main( void ) {
             drv_led_on(LED_RED);
           }
         }
+        gIsInConfig = 0;
         lowpower_config();
         halt();
-        gIsInConfig = 0;
         bPowerOn = FALSE;
     }
   }
