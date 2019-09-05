@@ -49,6 +49,12 @@ void ioinit()
 // Timeout
 #define RTE_TM_CONFIG_MODE              12000  // timeout in config mode, about 120s (12000 * 10ms)
 
+// sensitivity
+#define SENSITIVITY                     2  // When the difference of als value exceeds 2, the acquisition time is shortened 
+
+uint8_t collect_interval = 30;
+uint8_t leftcount = 0;
+
 
 // Public variables
 Config_t gConfig;
@@ -74,6 +80,8 @@ uint16_t gRedLefttime = 0;
 uint16_t gGreenLefttime = 0;
 
 uint16_t als_tick = 0;
+
+uint8_t last_als = 0;
 
 
 /** µç³ØµçÁ¿LEVEL */
@@ -240,14 +248,15 @@ void lowpower_config(void) {
   CLK_PeripheralClockConfig(CLK_Peripheral_USART1, DISABLE);
   CLK_PeripheralClockConfig(CLK_Peripheral_DAC, DISABLE);
   CLK_PeripheralClockConfig(CLK_Peripheral_ADC1, DISABLE);
-  //CLK_PeripheralClockConfig(CLK_Peripheral_RTC, DISABLE);
+  CLK_PeripheralClockConfig(CLK_Peripheral_RTC, DISABLE);
   CLK_PeripheralClockConfig(CLK_Peripheral_LCD, DISABLE);
   CLK_PeripheralClockConfig(CLK_Peripheral_AES, DISABLE);
   
   //CLK_HSICmd(DISABLE);  
   //CLK_DeInit();
   RTC_Config();      // add 3uA
-  RTC_SetWakeUpCounter(5);
+  RTC_WakeUpCmd(DISABLE);
+  RTC_SetWakeUpCounter(collect_interval);
   RTC_WakeUpCmd(ENABLE);
 }
 
@@ -436,7 +445,7 @@ bool SendMyMessage() {
       mutex = 0;
       RF24L01_set_mode_TX();
       RF24L01_write_payload(psndMsg, PLOAD_WIDTH);
-      WaitMutex(0x1FFFF);
+      WaitMutex(0x1FFF);
       if (mutex == 1) {
         m_cntRFSendFailed = 0;
         break; // sent sccessfully
@@ -446,7 +455,7 @@ bool SendMyMessage() {
         //WWDG->CR = 0x80;
         // RF24 Chip in low power
         RF24L01_DeInit();
-        delay = 0x1FFF;
+        delay = 0x1FF;
         while(delay--)feed_wwdg();
         RF24L01_init();
         NRF2401_EnableIRQ();
@@ -579,7 +588,21 @@ int main( void ) {
         }
         drv_led_on(led);
         als_checkData();
+        if((last_als<als_value && als_value-last_als>SENSITIVITY) || (last_als>als_value && last_als-als_value>SENSITIVITY)) 
+        {
+          leftcount = 10;
+          collect_interval = 5;
+        }
+        else if(leftcount>0)
+        {
+          leftcount--;
+        }
+        else if(leftcount == 0)
+        {
+          collect_interval = 30;
+        }
         Msg_SenALS(als_value);
+        last_als = als_value;
         SendMyMessage();
       }
     }
