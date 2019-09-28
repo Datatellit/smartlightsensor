@@ -440,7 +440,7 @@ bool SendMyMessage() {
     
     uint8_t lv_tried = 0;
     uint16_t delay;
-    while (lv_tried++ <= gConfig.rptTimes ) {
+    while (lv_tried++ <= 0) {
       feed_wwdg();
       mutex = 0;
       RF24L01_set_mode_TX();
@@ -467,8 +467,9 @@ bool SendMyMessage() {
       //It happens when rx address defers from tx address
       //asm("nop"); //Place a breakpoint here to see memory
       // Repeat the message if necessary
-      uint16_t delay = 0xFFF;
-      while(delay--)feed_wwdg();
+      // Need to test whether it has an effect
+      /*uint16_t delay = 0xFFF;
+      while(delay--)feed_wwdg();*/
     }
     
     // Switch back to receive mode
@@ -599,7 +600,7 @@ int main( void ) {
         }
         else if(leftcount == 0)
         {
-          collect_interval = 30;
+          collect_interval = 35;
         }
         Msg_SenALS(als_value);
         last_als = als_value;
