@@ -1,14 +1,14 @@
 #include "_global.h"
-#include "delay.h"
-#include "rf24l01.h"
-#include "timer4.h"
+#include "ADC1Dev.h"
 #include "button.h"
+#include "delay.h"
+#include "led.h"
 #include "MyMessage.h"
 #include "ProtocolParser.h"
+#include "rf24l01.h"
 #include "sen_als.h"
-#include "ADC1Dev.h"
 #include "stm8l15x_rtc.h"
-#include "led.h"
+#include "timer4.h"
 #include "UsartDev.h"
 #include "XlightComBus.h"
 
@@ -37,26 +37,25 @@ Connections:
 
 */
 
-void ioinit()
-{
-  GPIO_Init(GPIOB , GPIO_Pin_0 , GPIO_Mode_Out_PP_High_Fast);
-  //GPIO_Init(GPIOC , GPIO_Pin_4 , GPIO_Mode_In_FL_IT);
-}
-
+/* Private define ------------------------------------------------------------*/
+// Keep alive message interval, around 6 seconds
 #define MAX_RF_FAILED_TIME              10      // Reset RF module when reach max failed times of sending
+#define MAX_RF_RESET_TIME               3       // Reset Node when reach max times of RF module consecutive reset
 
+// Period (n * 10 ms) of check ALS input
+#define ALS_CHECK_INTERVAL              150
 
-// Timeout
-#define RTE_TM_CONFIG_MODE              12000  // timeout in config mode, about 120s (12000 * 10ms)
+#define POWER_CHECK_INTERVAL            40      // about 400ms (40 * 10ms)
+#define DC_FULLPOWER                    460
+#define DC_LOWPOWER                     368
 
 // sensitivity
-#define SENSITIVITY                     2  // When the difference of als value exceeds 2, the acquisition time is shortened 
+#define SENSITIVITY                     3  // When the difference of als value exceeds 2, the acquisition time is shortened
 
-uint8_t collect_interval = 30;
-uint8_t leftcount = 0;
+// Max laps that did not send ALS
+#define MAX_SKIP_SENDING_LAPS           5
 
-
-// Public variables
+/* Public variables ---------------------------------------------------------*/
 Config_t gConfig;
 
 MyMessage_t sndMsg;
@@ -68,57 +67,38 @@ bool gIsStatusChanged = FALSE;
 bool gIsConfigChanged = FALSE;
 bool gResetRF = FALSE;
 bool gResetNode = FALSE;
+bool gResendPresentation = FALSE;
+
+/* Private variables ---------------------------------------------------------*/
+uint8_t mSysStatus = SYS_ST_INIT;
 
 uint8_t _uniqueID[UNIQUE_ID_LEN];
+
+// Keep Alive Timer
+uint16_t mTimerKeepAlive = 0;
 uint8_t m_cntRFSendFailed = 0;
-uint8_t gIsWakeup = 1;
-uint8_t gIsInConfig = 0;
-uint16_t gKeyLowPowerLeft = 0;
-uint16_t gKeyLastInterval = 0;
-bool bPowerOn = FALSE;
-uint16_t gRedLefttime = 0;
-uint16_t gGreenLefttime = 0;
-
-uint16_t als_tick = 0;
-
-uint8_t last_als = 0;
-
-
-/** 电池电量LEVEL */
-typedef enum EQLevel
-{
-	LOWER = 0,		        //欠压
-	NORMAL= 1,			//正常
-        CHARGE= 2,                      //充电
-        FULL  = 3                       //充满
-}EQLevelType;
-
-/** 工作状态 */
-typedef enum WorkMode
-{
-	POWERDOWN = 0,		        //关机
-	POWERUP   = 1,			//开机
-}WorkModeType;
-
-typedef enum ButtonMode
-{
-        NOTHING = 0,
-	QUERY = 1,		        //关机
-	SWITCH   = 2,			//开机
-}ButtonModeType;
-
-
-EQLevelType gCurrEQLevel = NORMAL;
-WorkModeType gWorkMode = POWERUP;
-ButtonModeType gButtonMode = NOTHING;
-// collect interval
-uint16_t mCollectInterval = 0;
-
+uint8_t m_cntRFReset = 0;
 
 uint8_t mutex;
-uint16_t configMode_tick = 0;
+
+// collect interval
+uint8_t mCollectInterval = 30;
+uint8_t m_leftcount = 0;
+uint16_t m_nALSTick = ALS_CHECK_INTERVAL;
+uint8_t m_skipSendLaps = 0;
+uint8_t m_lastALS = 0;
+
+/* Private types -------------------------------------------------------------*/
+//...
+
+/* Private function prototypes -----------------------------------------------*/
 void tmrProcess();
 
+void dataio_init()
+{
+    // 检测使能口：高电平有效，才能进行电压和光强检测
+    GPIO_Init(GPIOB, GPIO_Pin_0, GPIO_Mode_Out_PP_High_Slow);
+}
 
 static void clock_init(void)
 {
@@ -129,48 +109,19 @@ static void clock_init(void)
   //CLK_ClockSecuritySystemEnable();
 }
 
-void SetFlashlight(uint8_t _st)
+void SetSysState(const uint8_t _st)
 {
-#ifdef ENABLE_FLASHLIGHT_LASER
-  if( _st == DEVICE_SW_ON ) {
-    ledFlashLight(SET);
-  } else if( _st == DEVICE_SW_OFF ) {
-    ledFlashLight(RESET);
-  } else {
-    ledToggleFlashLight;
-  }
-#endif  
+    if( mSysStatus != _st ) {
+        mSysStatus = _st;
+        // Notify the Gateway
+        Msg_DevState(mSysStatus, 0);
+    }
 }
 
-void SetLasterBeam(uint8_t _st)
+uint8_t GetSysState()
 {
-#ifdef ENABLE_FLASHLIGHT_LASER
-  if( _st == 1 ) {
-    ledLaserPen(SET);
-  } else if( _st == 0 ) {
-    ledLaserPen(RESET);
-  } else {
-    ledToggleLaserPen;
-  }
-#endif  
+    return mSysStatus;
 }
-
-// Blink LED to indicate starting
-void LED_Blink(bool _flash, bool _fast) {
-  if( _flash )
-    SetFlashlight(1);
-  else
-    SetLasterBeam(1);
-  //delay_ms(_fast ? 200 : 500);
-  WaitMutex(_fast ? 0x4FFF : 0xBFFF);
-  if( _flash )
-    SetFlashlight(0);
-  else
-    SetLasterBeam(0);
-  //delay_ms(_fast ? 200 : 500);
-  WaitMutex(_fast ? 0x4FFF : 0xBFFF);
-}
-
 
 /**
   * @brief  configure GPIOs before entering low power
@@ -194,17 +145,14 @@ void GPIO_LowPower_Config(void)
     GPIO_Init(GPIOC, GPIO_Pin_7, GPIO_Mode_Out_PP_Low_Slow); 
     GPIO_Init(GPIOD, GPIO_Pin_0|GPIO_Pin_1|GPIO_Pin_3,GPIO_Mode_In_FL_No_IT);  //无效
     GPIO_Init(GPIOD, GPIO_Pin_2|GPIO_Pin_4|GPIO_Pin_5|GPIO_Pin_6|GPIO_Pin_7, GPIO_Mode_Out_PP_Low_Slow);  */
-    GPIO_Init(GPIOB , GPIO_Pin_0 , GPIO_Mode_Out_PP_High_Fast);
-    GPIO_WriteBit(GPIOB,GPIO_Pin_0,RESET);
-    GPIO_Init(GPIOA, GPIO_Pin_2|GPIO_Pin_4, GPIO_Mode_Out_PP_Low_Slow);
-    GPIO_Init(GPIOA, GPIO_Pin_3|GPIO_Pin_5|GPIO_Pin_6|GPIO_Pin_7, GPIO_Mode_Out_PP_Low_Slow);
+  
+    GPIO_Init(GPIOA, GPIO_Pin_2|GPIO_Pin_3|GPIO_Pin_4|GPIO_Pin_5|GPIO_Pin_6|GPIO_Pin_7, GPIO_Mode_Out_PP_Low_Slow);
+    GPIO_Init(GPIOB, GPIO_Pin_0, GPIO_Mode_Out_PP_Low_Slow);
     GPIO_Init(GPIOB, GPIO_Pin_1|GPIO_Pin_2|GPIO_Pin_3, GPIO_Mode_Out_PP_Low_Slow);
-    GPIO_Init(GPIOC, GPIO_Pin_0|GPIO_Pin_1|GPIO_Pin_2, GPIO_Mode_Out_PP_Low_Slow);
-    GPIO_Init(GPIOC, GPIO_Pin_3, GPIO_Mode_Out_PP_Low_Slow); 
-    //GPIO_Init(GPIOC, GPIO_Pin_4, GPIO_Mode_Out_PP_Low_Slow); 
-    GPIO_Init(GPIOC, GPIO_Pin_5, GPIO_Mode_Out_PP_Low_Slow); 
-    GPIO_Init(GPIOC, GPIO_Pin_7, GPIO_Mode_Out_PP_Low_Slow); 
-    GPIO_Init(GPIOD, GPIO_Pin_2|GPIO_Pin_4|GPIO_Pin_5, GPIO_Mode_Out_PP_Low_Slow);
+    GPIO_Init(GPIOC, GPIO_Pin_0|GPIO_Pin_1|GPIO_Pin_2|GPIO_Pin_3|GPIO_Pin_5|GPIO_Pin_7, GPIO_Mode_Out_PP_Low_Slow);
+    GPIO_Init(GPIOD, GPIO_Pin_2|GPIO_Pin_4|GPIO_Pin_5|GPIO_Pin_6|GPIO_Pin_7, GPIO_Mode_Out_PP_Low_Slow);
+    GPIO_Init(GPIOE, GPIO_Pin_0|GPIO_Pin_1|GPIO_Pin_2|GPIO_Pin_3|GPIO_Pin_5, GPIO_Mode_Out_PP_Low_Slow);
+    GPIO_Init(GPIOF, GPIO_Pin_1|GPIO_Pin_2|GPIO_Pin_3|GPIO_Pin_5|GPIO_Pin_6|GPIO_Pin_7, GPIO_Mode_Out_PP_Low_Slow);
 }
 
 void RTC_Config()
@@ -215,13 +163,19 @@ void RTC_Config()
   RTC_ITConfig(RTC_IT_WUT, ENABLE);
 }
 
-
 // Enter Low Power Mode, which can be woken up by external interupts
 void lowpower_config(void) {
+  // Enter Sleeping Mode
+  // Don't use SetSysState(SYS_ST_SLEEP), because we don't want to send RF message
+  mSysStatus = SYS_ST_SLEEP;
+  
   // Set STM8 in low power
   PWR->CSR2 = 0x2;
   
   // Stop Timers
+  //TIM1_DeInit();
+  //TIM2_DeInit();
+  //TIM3_DeInit();
   TIM4_DeInit();
   
   // Set GPIO in low power
@@ -229,9 +183,9 @@ void lowpower_config(void) {
   
   // RF24 Chip in low power
   RF24L01_DeInit();
+  
   // TODO how process???
-  /*while ((CLK->ICKCR & 0x04) != 0x00)
-  {
+  /*while ((CLK->ICKCR & 0x04) != 0x00) {
     feed_wwdg();
   }*/
   
@@ -256,43 +210,38 @@ void lowpower_config(void) {
   //CLK_DeInit();
   RTC_Config();      // add 3uA
   RTC_WakeUpCmd(DISABLE);
-  RTC_SetWakeUpCounter(collect_interval);
+  RTC_SetWakeUpCounter(mCollectInterval);
   RTC_WakeUpCmd(ENABLE);
 }
 
 // Resume Normal Mode
 void wakeup_config(void) {
+  // System Woke Up
+  mSysStatus = SYS_ST_ON_BATTERY;
+
   clock_init();
   timer_init();
-  GPIO_WriteBit(GPIOB,GPIO_Pin_0,SET);
-  ADC_Config(); 
+  dataio_init();
+  ADC_Config();
+
+  // Init R&G-LED Indicator
+  drv_led_init(LED_PIN_INIT_HIGH);
+  
   RF24L01_init();
   NRF2401_EnableIRQ();
   UpdateNodeAddress(NODEID_GATEWAY);
+  
 #ifdef DEBUG_LOG
   usart_config(9600);
 #endif
 }
-
-
-/*// Save config to Flash
-void SaveConfig()
-{
-#ifndef ENABLE_SDTM
-  if( gIsConfigChanged ) {
-    Flash_WriteBuf(FLASH_DATA_EEPROM_START_PHYSICAL_ADDRESS, (uint8_t *)&gConfig, sizeof(gConfig));
-    gIsConfigChanged = FALSE;
-  }
-#endif  
-}*/
 
 // Save config to Flash
 void SaveBackupConfig()
 {
   if( gNeedSaveBackup ) {
     // Overwrite entire config bakup FLASH
-    if(Flash_WriteDataBlock(BACKUP_CONFIG_BLOCK_NUM, (uint8_t *)&gConfig, sizeof(gConfig)))
-    {
+    if(Flash_WriteDataBlock(BACKUP_CONFIG_BLOCK_NUM, (uint8_t *)&gConfig, sizeof(gConfig))) {
       gNeedSaveBackup = FALSE;
     }
   }
@@ -305,8 +254,7 @@ void SaveStatusData()
     uint8_t pData[50] = {0};
     uint16_t nLen = (uint16_t)(&(gConfig.nodeID)) - (uint16_t)(&gConfig);
     memcpy(pData, (uint8_t *)&gConfig, nLen);
-    if(Flash_WriteDataBlock(STATUS_DATA_NUM, pData, nLen))
-    {
+    if(Flash_WriteDataBlock(STATUS_DATA_NUM, pData, nLen)) {
       gIsStatusChanged = FALSE;
     }
 }
@@ -321,8 +269,7 @@ void SaveConfig()
   } 
   if( gIsConfigChanged ) {
     // Overwrite entire config FLASH
-    if(Flash_WriteDataBlock(0, (uint8_t *)&gConfig, sizeof(gConfig)))
-    {
+    if(Flash_WriteDataBlock(0, (uint8_t *)&gConfig, sizeof(gConfig))) {
       gIsStatusChanged = FALSE;
       gIsConfigChanged = FALSE;
       gNeedSaveBackup = TRUE;
@@ -333,53 +280,15 @@ void SaveConfig()
 
 bool IsConfigInvalid() {
   return( gConfig.version > XLA_VERSION || gConfig.version < XLA_MIN_VER_REQUIREMENT 
-       || /*!IS_VALID_REMOTE(gConfig.type)  || */gConfig.nodeID == 0
+       || (gConfig.type != SEN_TYP_ALS && gConfig.type != SEN_TYP_ZENSOR) 
+       || gConfig.nodeID == 0
        || gConfig.rfPowerLevel > RF24_PA_MAX || gConfig.rfChannel > 127 || gConfig.rfDataRate > RF24_250KBPS );
 }
 
 bool isNodeIdInvalid(uint8_t nodeid)
 {
-  return( !IS_SENSOR_NODEID(nodeid)  );
+  return( !IS_SENSOR_NODEID(nodeid) );
 }
-
-/*// Load config from Flash
-void LoadConfig()
-{
-    // Load the most recent settings from FLASH
-    Flash_ReadBuf(FLASH_DATA_EEPROM_START_PHYSICAL_ADDRESS, (uint8_t *)&gConfig, sizeof(gConfig));
-    if( IsConfigInvalid() ) {
-      Flash_ReadBuf(BACKUP_CONFIG_ADDRESS, (uint8_t *)&gConfig, sizeof(gConfig));
-      if( IsConfigInvalid() ) {
-        memset(&gConfig, 0x00, sizeof(gConfig));
-        gConfig.version = XLA_VERSION;
-        gConfig.indDevice = 0;
-        gConfig.present = 0;
-        gConfig.inPresentation = 0;
-        gConfig.enSDTM = 0;
-        gConfig.rptTimes = 1;
-        gConfig.nodeID = 130;
-        gConfig.rfChannel = RF24_CHANNEL;
-        gConfig.rfPowerLevel = RF24_PA_MAX;
-        gConfig.rfDataRate = RF24_250KBPS;      
-        memcpy(gConfig.NetworkID, RF24_BASE_RADIO_ID, ADDRESS_WIDTH);
-      }
-      gIsConfigChanged = TRUE;
-    }
-    else {
-      uint8_t bytVersion;
-      Flash_ReadBuf(BACKUP_CONFIG_ADDRESS, (uint8_t *)&bytVersion, sizeof(bytVersion));
-      if( bytVersion != gConfig.version ) gNeedSaveBackup = TRUE;
-    }
-    // Load the most recent status from FLASH
-    uint8_t pData[50] = {0};
-    uint16_t nLen = (uint16_t)(&(gConfig.nodeID)) - (uint16_t)(&gConfig);
-    Flash_ReadBuf(STATUS_DATA_ADDRESS, pData, nLen);
-    if(pData[0] >= XLA_MIN_VER_REQUIREMENT && pData[0] <= XLA_VERSION)
-    {
-      memcpy(&gConfig,pData,nLen);
-    }
-    gConfig.rfChannel = 87;
-}*/
 
 void UpdateNodeAddress(uint8_t _tx) {
   memcpy(rx_addr, gConfig.NetworkID, ADDRESS_WIDTH);
@@ -407,7 +316,6 @@ bool NeedUpdateRFAddress(uint8_t _dest) {
   return rc;
 }
 
-
 bool WaitMutex(uint32_t _timeout) {
   while(_timeout--) {
     if( mutex > 0 ) return TRUE;
@@ -419,263 +327,256 @@ bool WaitMutex(uint32_t _timeout) {
 // reset rf
 void ResetRFModule()
 {
-
-  if(gResetRF)
-  {
-    WWDG->CR = 0x80;
-    /*RF24L01_init();
-    NRF2401_EnableIRQ();
-    UpdateNodeAddress(NODEID_GATEWAY);*/
+  if(gResetRF) {
     gResetRF=FALSE;
+    WWDG->CR = 0x80;
+    /*
+    RF24L01_init();
+    NRF2401_EnableIRQ();
+    UpdateNodeAddress(NODEID_GATEWAY);
+    gResetRF=FALSE;
+    RF24L01_set_mode_RX();
+    */
   }
+  if( gResendPresentation ) {
+    // Send Presentation to confirm new settings are working
+    Msg_Presentation();
+    gResendPresentation = FALSE;
+  }  
 }
 
+uint16_t GetDelayTick(const uint8_t ds)
+{
+  uint16_t lv_delaytick = 0;
+  if(ds == BROADCAST_ADDRESS) {
+    // base = 210ms, delta = 100ms
+    lv_delaytick = ((gConfig.nodeID - NODEID_MIN_SUPERSENSOR + 1) % 32 ) * 10 + 11;
+  } else {
+    lv_delaytick = 4;   // 40ms
+  }
+  return lv_delaytick;
+}
 
 // Send message and switch back to receive mode
 bool SendMyMessage() {
-  if( bMsgReady ) {
-    
+#ifdef RF24
+  if( bMsgReady && delaySendTick == 0 ) {
     // Change tx destination if necessary
     NeedUpdateRFAddress(sndMsg.header.destination);
-    
+      
     uint8_t lv_tried = 0;
     uint16_t delay;
-    while (lv_tried++ <= 0) {
-      feed_wwdg();
+    while (lv_tried++ <= gConfig.rptTimes ) {
+      
       mutex = 0;
       RF24L01_set_mode_TX();
       RF24L01_write_payload(psndMsg, PLOAD_WIDTH);
-      WaitMutex(0x1FFF);
+      WaitMutex(0x1FFFF);
       if (mutex == 1) {
         m_cntRFSendFailed = 0;
+        m_cntRFReset = 0;
         break; // sent sccessfully
-      } else if( m_cntRFSendFailed++ > MAX_RF_FAILED_TIME ) {
-        // Reset RF module
-        m_cntRFSendFailed = 0;
-        //WWDG->CR = 0x80;
-        // RF24 Chip in low power
-        RF24L01_DeInit();
-        delay = 0x1FF;
-        while(delay--)feed_wwdg();
-        RF24L01_init();
-        NRF2401_EnableIRQ();
-        UpdateNodeAddress(NODEID_GATEWAY);
-        continue;
+      } else {
+        m_cntRFSendFailed++;
+        if( m_cntRFSendFailed >= MAX_RF_FAILED_TIME ) {
+          m_cntRFSendFailed = 0;
+          m_cntRFReset++;
+          if( m_cntRFReset >= MAX_RF_RESET_TIME ) {
+            // Cold Reset
+            WWDG->CR = 0x80;
+            m_cntRFReset = 0;
+            break;
+          } else if( m_cntRFReset >= 2 ) {
+            // Reset whole node
+            mSysStatus = SYS_ST_RESET;
+            break;
+          }
+
+          // Reset RF module
+          //RF24L01_DeInit();
+          delay = 0x1FFF;
+          while(delay--)feed_wwdg();
+          RF24L01_init();
+          NRF2401_EnableIRQ();
+          UpdateNodeAddress(NODEID_GATEWAY);
+          continue;
+        }
       }
       
       //The transmission failed, Notes: mutex == 2 doesn't mean failed
       //It happens when rx address defers from tx address
       //asm("nop"); //Place a breakpoint here to see memory
       // Repeat the message if necessary
-      // Need to test whether it has an effect
-      /*uint16_t delay = 0xFFF;
-      while(delay--)feed_wwdg();*/
+      delay = 0xFFF;
+      while(delay--)feed_wwdg();
     }
     
     // Switch back to receive mode
     bMsgReady = 0;
     RF24L01_set_mode_RX();
+    
+    // Reset Keep Alive Timer
+    mTimerKeepAlive = 0;
   }
-
   return(mutex > 0);
+#else
+  return FALSE;
+#endif  
 }
 
-// Change LED or Laser to indecate execution of specific operation
-void OperationIndicator() {
- //todo
-}
-
-uint16_t eqv;
+uint16_t m_eqv;
 void Check_eq()
 {
-  uint16_t eq1,eq2;
-  eq_checkData(&eq1,&eq2);
+  uint16_t eq1, eq2;
+  eq_checkData(&eq1, &eq2);
   printnum(eq1);
   printlog("-");
   printnum(eq2);
-  if(eq1 > eq2 + 250) 
-  { //eqv1-eqv2 > 0.2v (eqv1 = eq1*3.3/4096)
-    // 电池进电
-
+  if(eq1 > eq2 + 250) {
+    // eqv1-eqv2 > 0.2v (eqv1 = eq1*3.3/4096)
+    // 电池进电: 红灯亮、绿灯灭
     printlog("charge...");
-
-    gCurrEQLevel = CHARGE;
-    drv_led_off(LED_GREEN);
-    drv_led_on(LED_RED);
-  }
-  else
-  { // 电池不进电（插充电器但电池已充满或者没插充电器）
+    led_red_on();
+    led_green_off();
+    SetSysState(SYS_ST_CHARGING);
+  } else { // 电池不进电（插充电器但电池已充满或者没插充电器）
     printlog("normal...");
-
-    eqv = (uint32_t)eq2*330 / 2048;
-    printnum(eqv);
-    if(eqv >= 460)
-    { // 插充电器，电池已充满
+    m_eqv = (uint32_t)eq2 * 330 / 2048;
+    printnum(m_eqv);
+    if(m_eqv >= DC_FULLPOWER) {
+      // 插充电器，电池已充满：红灯灭、绿灯亮
       printlog("full...");
-      drv_led_off(LED_RED);
-      gCurrEQLevel = FULL;
-    }
-    else
-    {
+      led_red_off();
+      led_green_on();
+      SetSysState(SYS_ST_RUNNING);
+    } else {
+      // 没插充电器（电池供电）：红灯闪或灭、绿灯灭
       printlog("not full...");
-      drv_led_off(LED_GREEN);
-      drv_led_off(LED_RED);
-      gCurrEQLevel = NORMAL;
-      if(eqv < LOWPOWER)
-      {
-        gCurrEQLevel = LOWER;
+      led_green_off();      
+      if(m_eqv < DC_LOWPOWER) {
+        // 电池电压低：红灯闪
+        SetSysState(SYS_ST_LOW_BATTERY);
+        led_red_flashing();
+      } else {
+        // 电池电压正常：红灯灭
+        SetSysState(SYS_ST_ON_BATTERY);
+        led_red_off();
       }
     }
   }
 }
 
-int main( void ) {
+void check_send_als()
+{
+    // Check ALS input
+    als_checkData();
+    // Compute wakeup count down value: mCollectInterval
+    uint8_t lv_delta = (m_lastALS > als_value ? m_lastALS - als_value : als_value - m_lastALS);
+    if( lv_delta > SENSITIVITY ){
+      m_leftcount = 10;
+      mCollectInterval = 5;
+    } else if( m_leftcount > 0 ) {
+      m_leftcount--;
+    } else if( m_leftcount == 0 ) {
+      mCollectInterval = 35;
+    }
+    // Send ALS if delta > SENSITIVITY or didn't send in recent 5 laps
+    if( lv_delta > SENSITIVITY || ++m_skipSendLaps > MAX_SKIP_SENDING_LAPS ) {
+      led_green_flashing();     // Flashing green indicates sendind
+      Msg_SenALS(als_value);
+      m_lastALS = als_value;
+      SendMyMessage();
+      led_green_flashing();     // Flashing green indicates sendind
+    }
+}
 
+int main( void ) {
+   
   // Init clock, timer and button
   clock_init();
   timer_init();
+  dataio_init();
   button_init();
-  drv_led_init();
+  
+  // Init R&G-LED Indicator
+  drv_led_init(LED_PIN_INIT_HIGH);
+ 
+  // System enter setup state
+  SetSysState(SYS_ST_SETUP);
+  
+#ifdef RF24  
   // Go on only if NRF chip is presented
   RF24L01_init();
   while(!NRF24L01_Check());
+#endif
   
   // Load config from Flash
   FLASH_DeInit();
   Read_UniqueID(_uniqueID, UNIQUE_ID_LEN);
   LoadConfig();
+  
+#ifdef RF24  
   // NRF_IRQ
   NRF2401_EnableIRQ();
-
+#endif
+  
   // Init Watchdog
   wwdg_init();
   
   TIM4_10ms_handler = tmrProcess;
+  
+  // Init ADC
   ADC_Config();
+  
+  // Send Presentation Message
+  UpdateNodeAddress(NODEID_GATEWAY);
+  Msg_Presentation();
+  SendMyMessage();
+  
 #ifdef DEBUG_LOG
   usart_config(9600);
 #endif
-  ////////////////PB0 control pin test code///////////////////////////
-  ioinit();
-  GPIO_WriteBit(GPIOB,GPIO_Pin_0,SET);
-  ////////////////PB0 control pin test code///////////////////////////
-  // Send Presentation Message
-  Msg_Presentation();
-  SendMyMessage();         // add 20uA,powerdown rf chip when rfdeinit,resolve
-
+  
+  // System enter running state
+  SetSysState(SYS_ST_RUNNING);
+  
   printlog("start...");
-  gIsInConfig = 1;
   while (1) {
-       
     // Feed the Watchdog
     feed_wwdg();
-    LedPortType led = LED_GREEN;
-    ///////////////ALS collect,and send////////////////////////
-    if(gIsWakeup)
-    { // rtc timer wakeup
-      gIsWakeup = 0;
-      if(gWorkMode == POWERUP)
-      {
-        if(!bPowerOn)
-        {
-          bPowerOn = TRUE;
-          wakeup_config();
-        }   
-        Check_eq();
-        
-        if(gCurrEQLevel == LOWER)
-        {
-          led = LED_RED;
-        }
-        drv_led_on(led);
-        als_checkData();
-        if((last_als<als_value && als_value-last_als>SENSITIVITY) || (last_als>als_value && last_als-als_value>SENSITIVITY)) 
-        {
-          leftcount = 10;
-          collect_interval = 5;
-        }
-        else if(leftcount>0)
-        {
-          leftcount--;
-        }
-        else if(leftcount == 0)
-        {
-          collect_interval = 35;
-        }
-        Msg_SenALS(als_value);
-        last_als = als_value;
-        SendMyMessage();
+    ////////////rfscanner process///////////////////////////////
+    ProcessOutputCfgMsg(); 
+    
+    // reset rf if required
+    ResetRFModule();   
+
+    // Send message if ready
+    SendMyMessage();
+    
+    // Save Config if Changed
+    SaveConfig();
+    
+    // Save config into backup area
+    SaveBackupConfig(); 
+    
+    // Enter Low Power Mode
+    if( (mSysStatus == SYS_ST_ON_BATTERY || mSysStatus == SYS_ST_LOW_BATTERY) && !gConfig.inConfigMode ) {
+      if( tmrIdleDuration > TIMEOUT_IDLE ) {
+        printlog("enter low...");
+        tmrIdleDuration = 0;
+        lowpower_config();
+        halt();
       }
-    }
-    ///////////////ALS collect,and send////////////////////////
-    if(gIsInConfig)
-    { // 正在配置中
-      if(gKeyLowPowerLeft == 0)
-      {
-        gKeyLowPowerLeft = 600;
-        drv_led_on(LED_GREEN);
-      }
-
-      ////////////rfscanner process///////////////////////////////
-      ProcessOutputCfgMsg(); 
-
-      if(gResetNode)
-      {
-        gResetNode = FALSE;
-      }
-      ////////////rfscanner process/////////////////////////////// 
-      // Save Config if Changed
-      SaveConfig(); 
-      // Save config into backup area
-      SaveBackupConfig(); 
-      // reset rf
-      ResetRFModule();
-    }
-    if(gKeyLowPowerLeft == 0)
-    {
-        gKeyLastInterval = 0;
-        if(gCurrEQLevel == NORMAL || gCurrEQLevel == LOWER)
-        { // 非充电状态下，低功耗时必须保证灯灭
-          printlog("enter low...");
-          drv_led_off(LED_RED);
-          drv_led_off(LED_GREEN);
-          gIsInConfig = 0;
-          lowpower_config();
-          halt();
-          bPowerOn = FALSE;
-        }
-        else
-        { // 充电状态下，根据充电状态灯常亮
-
-          printlog("not low charge...");
-
-          if(gCurrEQLevel == FULL)
-          {    
-            drv_led_off(LED_RED);
-            drv_led_on(LED_GREEN);
-          }
-          else if(gCurrEQLevel == CHARGE)
-          {
-            drv_led_off(LED_GREEN);
-            drv_led_on(LED_RED);
-          }
-          
-          // 5s send interval
-          if(als_tick>= 500)
-          {
-            als_checkData();
-            Msg_SenALS(als_value);
-            SendMyMessage();
-            als_tick = 0;
-          }
-          Check_eq();
-
-        }
-
+    } else if( mSysStatus == SYS_ST_SLEEP ) { 
+        tmrIdleDuration = 0;
+        // Make sure check ALS right away
+        m_nALSTick = 0;
+        // Wakeup
+        wakeup_config();
     }
   }
 }
-
+    
 void Button_Action()
 {
   /*if(gKeyLastInterval >100 && gKeyLastInterval <=500)
@@ -706,19 +607,23 @@ void Button_Action()
   }*/
 }
 
-// Execute timer operations
+// 10ms timer handler
 void tmrProcess() {
-  if(gKeyLowPowerLeft>0)
-  {
-    gKeyLowPowerLeft--;
-  }
-  if(gKeyLastInterval>=0)
-  {
-    gKeyLastInterval++;
-  }
-  if(als_tick < 500)
-  {
-    als_tick++;
+  // Ticks
+  mTimerKeepAlive++;
+  if( delaySendTick > 0) delaySendTick--;
+    
+  // Check and send ALS data
+  if( m_nALSTick > 0 ) {
+    m_nALSTick--;
+    if( m_nALSTick % POWER_CHECK_INTERVAL == 0 ) {
+      // Check Power voltage
+      Check_eq();
+    }
+  } else { // 1.5 s
+    check_send_als();
+    // Auto-reload timer    
+    m_nALSTick = ALS_CHECK_INTERVAL;
   }
 }
 
@@ -754,5 +659,5 @@ INTERRUPT_HANDLER(RTC_CSSLSE_IRQHandler, 4)
      it is recommended to set a breakpoint on the following instruction.
   */
   RTC_ClearITPendingBit(RTC_IT_WUT); //中断标志位要清除
-  gIsWakeup = 1;
+  tmrIdleDuration = 0;  // rtc timer wakeup
 }

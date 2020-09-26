@@ -6,7 +6,22 @@
 #include "rf24l01.h"
 
 uint16_t delaySendTick = 0;
-bool bDelaySend = FALSE;
+
+bool NeedProcess(const uint8_t _targetNID, uint8_t *arrType, uint8_t num)
+{
+  // If BROADCAST_ADDRESS msg, using NodeType; 
+  // If group, using DevType;
+  // Otherwise, return true directly
+  uint8_t lv_type;
+  if( _targetNID == BROADCAST_ADDRESS ) lv_type = NodeID2Type(_targetNID);
+  else if( IS_GROUP_NODEID(_targetNID) ) lv_type = gConfig.type;
+  else return TRUE;
+  for( uint8_t tidx = 0; tidx < num; tidx++ ) {
+    // Return true if matches any one in the list
+    if(*(arrType+tidx) == lv_type) TRUE;
+  }
+  return FALSE;
+}
 
 uint8_t ParseProtocol(){
   if( rcvMsg.header.destination != gConfig.nodeID && rcvMsg.header.destination != BROADCAST_ADDRESS ) return 0;
@@ -45,8 +60,17 @@ uint8_t ParseProtocol(){
 //    uint8_t devType5;
 //}MyMsgPayload_t  
 */ 
-          MsgScanner_ProbeAck(_sender);        
-          return 1;
+          bool bNeedProcess = TRUE;
+          uint8_t devTypeNum = _lenPayl;
+          if(devTypeNum > 0) {
+            bNeedProcess = NeedProcess(rcvMsg.header.destination, &rcvMsg.payload.data[0],devTypeNum);
+          }
+          if(bNeedProcess) {
+            delaySendTick = GetDelayTick(rcvMsg.header.destination);
+            //MsgScanner_ProbeAck(_sender);
+            Msg_DevState(mSysStatus, 1);
+          }
+          return 0;
         }
       }
     }    
@@ -60,7 +84,7 @@ uint8_t ParseProtocol(){
   return 0;
 }
 
-void Msg_SenALS(uint8_t _value) {
+void Msg_SenALS(const uint8_t _value) {
   build(NODEID_GATEWAY, S_LIGHT_LEVEL, C_PRESENTATION, V_LIGHT_LEVEL, 0, 0);
   moSetPayloadType(P_BYTE);
   moSetLength(1);
@@ -83,5 +107,22 @@ void Msg_Presentation() {
   moSetPayloadType(P_ULONG32);
   moSetLength(UNIQUE_ID_LEN);
   memcpy(sndMsg.payload.data, _uniqueID, UNIQUE_ID_LEN);
+  bMsgReady = 1;
+}
+
+// Device Status Notification
+void Msg_DevState(const uint8_t _state, const uint8_t _hasid) {
+  uint8_t payl_len = 0;
+  build(NODEID_GATEWAY, gConfig.subID, C_REQ, V_STATUS, 0, 1);
+  if(_hasid) {
+    memcpy(sndMsg.payload.data, _uniqueID, UNIQUE_ID_LEN);
+    payl_len += UNIQUE_ID_LEN;
+    moSetVersion(2);
+    moSetPayloadType(P_CUSTOM);
+  } else {
+    moSetPayloadType(P_BYTE);
+  }
+  sndMsg.payload.data[payl_len++] = _state;
+  moSetLength(payl_len); 
   bMsgReady = 1;
 }

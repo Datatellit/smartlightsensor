@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+
+<userOverrides>
+  <override>
+    <path>D:\dtitcode\EndPoints_2020\smartlightsensor\Project\inc\led.h</path>
+    <encoding>System</encoding>
+  </override>
+  <override>
+    <path>D:\dtitcode\EndPoints_2020\smartlightsensor\Project\src\ADC1Dev.c</path>
+    <encoding>System</encoding>
+  </override>
+  <override>
+    <path>D:\dtitcode\EndPoints_2020\smartlightsensor\Project\src\led.c</path>
+    <encoding>System</encoding>
+  </override>
+  <override>
+    <path>D:\dtitcode\EndPoints_2020\smartlightsensor\Project\src\main.c</path>
+    <encoding>System</encoding>
+  </override>
+</userOverrides>
+
+

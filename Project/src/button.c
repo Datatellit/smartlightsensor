@@ -34,12 +34,10 @@ LEDs
 // PIN Map
 //---------------------------------------------------
 // Button pin map
-#define BUTTONS_PORT1           (GPIOC)
-#define BUTTON_PIN_SWITCH       (GPIO_Pin_4)
+#define BUTTONS_PORT1               (GPIOC)
+#define BUTTON_PIN_SWITCH           (GPIO_Pin_4)
 
 //---------------------------------------------------
-
-
 // Get Button pin input
 #define pinKeySwitch                ((BitStatus)(BUTTONS_PORT1->IDR & (uint8_t)BUTTON_PIN_SWITCH))
 
@@ -48,7 +46,6 @@ LEDs
 #define BUTTON_WAIT_3S                          300     // The unit is 10 ms, so the duration is 3 s.
 #define BUTTON_DOUBLE_BTN_DURATION              50      // The unit is 10 ms, so the duration is 500 ms.
 #define BUTTON_DOUBLE_BTN_TRACK_DURATION        300     // The unit is 10 ms, so the duration is 3 s.
-
 
 static button_timer_status_t  m_btn_timer_status[BTN_NUM] = {BUTTON_STATUS_INIT};
 static bool detect_double_btn_press[BTN_NUM] = {FALSE};
@@ -138,8 +135,6 @@ void btn_debonce_timeout_handler(uint8_t _tag)
       timer_stop(m_timer_id_btn_detet[_btn]);
       if ((current_button & btn_bit_postion[_btn]) == 0)
       {
-        // important
-        gKeyLowPowerLeft = 500;
         button_push(_btn);
       }
       else
@@ -296,6 +291,9 @@ void button_push(uint8_t _btn)
   // Assert button
   if( !IS_VALID_BUTTON(_btn) ) return;
   
+  if( _btn == keylstCenter ) {
+    gConfig.inConfigMode = 1;
+  }
   btn_is_pushed[_btn] = TRUE;
   check_track_double_button();
   
@@ -311,6 +309,9 @@ void button_release(uint8_t _btn)
   // Assert button
   if( !IS_VALID_BUTTON(_btn) ) return;
   
+  if( _btn == keylstCenter ) {
+    gConfig.inConfigMode = 0;
+  }
   btn_is_pushed[_btn] = FALSE;
   button_event_t button_event = BUTTON_INVALID;
   
@@ -355,7 +356,7 @@ void button_release(uint8_t _btn)
 
 void button_event_handler(uint8_t _pin)
 {
-  gKeyLowPowerLeft = 500;
+  tmrIdleDuration = 500;
   button_first_detect_status = GPIO_ReadInputData(BUTTONS_PORT1);
   timer_start(m_timer_id_debonce_detet, BUTTON_DEBONCE_DURATION);
 }

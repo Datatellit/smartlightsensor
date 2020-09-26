@@ -8,16 +8,23 @@
 #include "common.h"
 
 // Xlight Application Identification
-#define XLA_VERSION               0x20
 #define XLA_ORGANIZATION          "xlight.ca"               // Default value. Read from EEPROM
-#define XLA_PRODUCT_NAME          "XRemote"                 // Default value. Read from EEPROM
+#define XLA_PRODUCT_NAME          "XSensor"                 // Default value. Read from EEPROM
 
-#define FULLPOWER        420
-#define LOWPOWER         368
-
-#define XLA_PRODUCT_Type          ZEN_TARGET_ALSSENSOR
+// Use the biggest possible NodeID of this type as default to avoid conflict with existing devices.
+// After the device started, we can change it's NodeID to what ever we want.
 #define XLA_PRODUCT_NODEID        NODEID_MAX_SUPERSENSOR
-#define XLA_MIN_VER_REQUIREMENT   0x20
+
+// Note: please modify this to reflect the correct device type!!!
+/// This setting will be presented in devType ('tp') field of message
+#define XLA_PRODUCT_Type          SEN_TYP_ALS               // Replace ZEN_TARGET_ALSSENSOR
+
+// Version Format: [ver].[release], where [ver] & [release] are both 4 bits with a value between 0 to 15
+#define XLA_VERSION               0x31                      // 3.1 
+#define XLA_MIN_VER_REQUIREMENT   0x31
+
+#define LED_PIN_INIT_HIGH         0         // Button LED Pin High or Low on initialization
+
 typedef struct
 {
   // Static & status parameters
@@ -50,22 +57,22 @@ extern bool gNeedSaveBackup;
 extern bool gIsStatusChanged;
 extern bool gResetRF;
 extern bool gResetNode;
+extern bool gResendPresentation;
 
 extern uint8_t _uniqueID[UNIQUE_ID_LEN];
-extern uint16_t gKeyLowPowerLeft;
+extern uint8_t mSysStatus;
 
 bool WaitMutex(uint32_t _timeout);
 void RF24L01_IRQ_Handler();
-uint8_t ChangeCurrentDevice(uint8_t _newDev);
 void UpdateNodeAddress(uint8_t _tx);
 bool SendMyMessage();
-void EraseCurrentDeviceInfo();
-void ToggleSDTM();
-void SetConfigMode(bool _sw, uint8_t _devIndex);
-bool SayHelloToDevice(bool infinate);
 void Button_Action();
 bool IsConfigInvalid();
 bool isNodeIdInvalid(uint8_t nodeid);
+uint16_t GetDelayTick(const uint8_t ds);
+
+void SetSysState(const uint8_t _st);
+uint8_t GetSysState();
 
 //#define TEST
 #ifdef TEST
