@@ -5,12 +5,12 @@
 
 // LED硬件定义
 #define LED_RED_GPIO_PORT			GPIOD								
-//#define LED_RED_GPIO_PIN			GPIO_Pin_7
-#define LED_RED_GPIO_PIN			GPIO_Pin_2
+#define LED_RED_GPIO_PIN			GPIO_Pin_7
+//#define LED_RED_GPIO_PIN			GPIO_Pin_2
 
 #define LED_GREEN_GPIO_PORT			GPIOB						
-//#define LED_GREEN_GPIO_PIN			GPIO_Pin_6
-#define LED_GREEN_GPIO_PIN			GPIO_Pin_1
+#define LED_GREEN_GPIO_PIN			GPIO_Pin_6
+//#define LED_GREEN_GPIO_PIN			GPIO_Pin_1
 
 /** LED定义 */
 typedef enum LedPort

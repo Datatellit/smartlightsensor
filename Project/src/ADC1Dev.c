@@ -9,6 +9,7 @@
 
 void ADC_Config()
 {
+  GPIO_Init(GPIOD, GPIO_Pin_0 | GPIO_Pin_1 | GPIO_Pin_3, GPIO_Mode_In_PU_No_IT);
   CLK_PeripheralClockConfig(CLK_Peripheral_ADC1 , ENABLE);    // 使能ADC时钟  
   ADC_Init(ADC1 ,
             ADC_ConversionMode_Single ,     // 配置ADC1是单次采样

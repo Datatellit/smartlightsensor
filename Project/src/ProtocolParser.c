@@ -18,7 +18,7 @@ bool NeedProcess(const uint8_t _targetNID, uint8_t *arrType, uint8_t num)
   else return TRUE;
   for( uint8_t tidx = 0; tidx < num; tidx++ ) {
     // Return true if matches any one in the list
-    if(*(arrType+tidx) == lv_type) TRUE;
+    if(*(arrType+tidx) == lv_type) return TRUE;
   }
   return FALSE;
 }
@@ -102,8 +102,8 @@ void Msg_RequestNodeID() {
 }
 
 // Prepare device presentation message
-void Msg_Presentation() {
-  build(NODEID_GATEWAY, S_ZENSENSOR, C_PRESENTATION, gConfig.type, 1, 0);
+void Msg_Presentation(const uint8_t _rack) {
+  build(NODEID_GATEWAY, S_ZENSENSOR, C_PRESENTATION, gConfig.type, _rack, 0);
   moSetPayloadType(P_ULONG32);
   moSetLength(UNIQUE_ID_LEN);
   memcpy(sndMsg.payload.data, _uniqueID, UNIQUE_ID_LEN);

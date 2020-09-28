@@ -6,7 +6,7 @@
 #define ALS_DATA_PORT                   GPIOD
 #define ALS_DATA_PIN_ID                 GPIO_Pin_3
 
-#define ALS_MA_NUM             10
+#define ALS_MA_NUM                      10
 
 uint8_t als_value;
 
@@ -18,5 +18,3 @@ bool als_checkData()
   als_value = (uint16_t)(lv_adcValue / 40.95 + 0.5);
   return TRUE;
 }
-
-
