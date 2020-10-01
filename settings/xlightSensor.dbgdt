@@ -46,7 +46,7 @@
           <item>mCollectInterval</item>
           <item>gConfig.inConfigMode</item>
           <item>mSysStatus</item>
-          <item></item>
+          <item/>
         </expressions>
         <col-names>
           <item>Expression</item>

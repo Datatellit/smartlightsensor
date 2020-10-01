@@ -251,6 +251,17 @@ void wakeup_config(void) {
 #endif
 }
 
+bool WakeupMeFromSleep()
+{
+    if( mSysStatus == SYS_ST_SLEEP ) { 
+        tmrIdleDuration = 0;
+        // Wakeup
+        wakeup_config();
+        return TRUE;
+    }
+    return FALSE;
+}
+
 #endif // Low Power Mode Code
 
 // Save config to Flash
@@ -363,6 +374,10 @@ void ResetRFModule()
     gResendPresentation = FALSE;
   }
   if(gResetNode) {
+#ifdef ENABLE_LOW_POWER_MODE
+    // Wake Me up
+    WakeupMeFromSleep();
+#endif     
     mSysStatus = SYS_ST_RESET;
     gResetNode = FALSE;
   }  
@@ -411,7 +426,7 @@ bool SendMyMessage() {
             break;
           } else if( m_cntRFReset >= 2 ) {
             // Reset whole node
-            mSysStatus = SYS_ST_RESET;
+            gResetNode = TRUE;
             break;
           }
 
@@ -583,7 +598,7 @@ int main( void ) {
     
     // System enter running state
     SetSysState(SYS_ST_RUNNING);
-    while( mSysStatus == SYS_ST_RUNNING ) { // Working Loop
+    while( mSysStatus > SYS_ST_INIT &&  mSysStatus < SYS_ST_RESET ) { // Working Loop
       // Feed the Watchdog
       feed_wwdg();
       // Reset main-loop-dead-lock-check timer
@@ -595,8 +610,7 @@ int main( void ) {
       ResetRFModule();   
 
 /* Low Power Mode Code -------------------------------------------------------*/
-#ifdef ENABLE_LOW_POWER_MODE
-      
+#ifdef ENABLE_LOW_POWER_MODE      
       // Enter Low Power Mode
       if( (mSysStatus == SYS_ST_ON_BATTERY || mSysStatus == SYS_ST_LOW_BATTERY) && !gConfig.inConfigMode ) {
         if( tmrIdleDuration > TIMEOUT_IDLE ) {
@@ -611,6 +625,11 @@ int main( void ) {
           m_nALSTick = 0;
           // Wakeup
           wakeup_config();
+      }
+      // Wake Me up
+      if( WakeupMeFromSleep() ) {
+          // Make sure check ALS immediately
+          m_nALSTick = 0;        
       }
 #endif // Low Power Mode Code
       
