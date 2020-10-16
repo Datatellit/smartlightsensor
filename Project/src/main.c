@@ -60,7 +60,7 @@ Connections:
 #define SENSITIVITY                     3  // When the difference of als value exceeds 2, the acquisition time is shortened
 
 // Max laps that did not send ALS
-#define MAX_SKIP_SENDING_LAPS           5
+#define MAX_SKIP_SENDING_LAPS           10
 
 /* Public variables ----------------------------------------------------------*/
 Config_t gConfig;
@@ -118,7 +118,7 @@ void SetSysState(const uint8_t _st)
     if( mSysStatus != _st ) {
         mSysStatus = _st;
         // Notify the Gateway
-        Msg_DevState(mSysStatus, 0);
+        //Msg_DevState(mSysStatus, 0);
     }
 }
 
@@ -332,6 +332,7 @@ uint16_t GetDelayTick(const uint8_t ds)
 }
 
 // Send message and switch back to receive mode
+// Notes: never call this function in timer or other IRQ fucntions
 bool SendMyMessage() {
 #ifdef RF24
   if( bMsgReady && delaySendTick == 0 ) {
@@ -344,10 +345,12 @@ bool SendMyMessage() {
       mutex = 0;
       RF24L01_set_mode_TX();
       RF24L01_write_payload(psndMsg, PLOAD_WIDTH);
-      if( !WaitMutex(0x1FFFF) ) {
+      if( !WaitMutex(0xFFFF) ) { // FFFF = 25ms, 1A000 = 40ms, 1FFFF = 50ms
         // Timeout: no IRQ
-        mutex = RF24L01_was_data_sent();
+        mutex = (RF24L01_get_whatHappened() & RF_RESULT_SENT);
       }
+      // Switch back to receive mode as early as possible
+      RF24L01_set_mode_RX();
       if( mutex == 1 ) {
         m_cntRFSendFailed = 0;
         m_cntRFReset = 0;
@@ -376,10 +379,7 @@ bool SendMyMessage() {
       // Delay for a while and retry sending
       delay_ms(10);
     }
-    
-    // Switch back to receive mode
     bMsgReady = 0;
-    RF24L01_set_mode_RX();    
   }
   return(mutex > 0);
 #else
@@ -448,8 +448,7 @@ void check_send_als()
       led_green_flashing();     // Flashing green indicates sending
       Msg_SenALS(als_value);
       m_lastALS = als_value;
-      SendMyMessage();
-      led_green_flashing();     // Flashing green indicates sending
+      m_skipSendLaps = 0;
     }
 }
 
@@ -620,23 +619,17 @@ void tmrProcess() {
 
 void RF24L01_IRQ_Handler() {
   tmrIdleDuration = 0;
-  if(RF24L01_is_data_available()) {
-    //Packet was received
-    RF24L01_clear_interrupts();
+  uint8_t lv_rfst = RF24L01_get_whatHappened();
+  RF24L01_clear_interrupts();
+  if( lv_rfst & RF_RESULT_RECEIVED ) {
+    // Packet was received (4)
     RF24L01_read_payload(prcvMsg, PLOAD_WIDTH);
     bMsgReady = ParseProtocol();
-    return;
+  } 
+  if( lv_rfst & (RF_RESULT_SENT | RF_RESULT_MAX_RT) ) {
+    // Packet was sent (1) or max retries reached (2)
+    mutex = (lv_rfst & RF_RESULT_SENT ? 1 : 2); 
   }
- 
-  uint8_t sent_info;
-  if (sent_info = RF24L01_was_data_sent()) {
-    //Packet was sent or max retries reached
-    RF24L01_clear_interrupts();
-    mutex = sent_info; 
-    return;
-  }
-
-   RF24L01_clear_interrupts();
 }
 
 /**
