@@ -10,6 +10,7 @@
 #include "stm8l15x_rtc.h"
 #include "timer4.h"
 #include "UsartDev.h"
+#include "wwdg.h"
 
 /*
 Xlight Remoter Program
@@ -47,7 +48,7 @@ Connections:
 // Period (n * 10 ms) of check ALS input
 #define ALS_CHECK_INTERVAL              150
 
-#define POWER_CHECK_INTERVAL            40      // about 400ms (40 * 10ms)
+#define POWER_CHECK_INTERVAL            45      // about 450ms (45 * 10ms)
 #define DC_FULLPOWER                    460
 #define DC_LOWPOWER                     368
 
